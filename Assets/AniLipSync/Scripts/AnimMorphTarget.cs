@@ -1,4 +1,7 @@
 ﻿using UnityEngine;
+using VRM;
+using System.Collections.Generic;
+using System.Linq;
 #if UNITY_EDITOR
 using UnityEditor;
 #endif
@@ -9,7 +12,7 @@ namespace XVI.AniLipSync {
         public AnimationCurve[] transitionCurves = new AnimationCurve[5];
 
         [Tooltip("カーブの値をBlendShapeに適用する際の倍率")]
-        public float curveAmplifier = 100.0f;
+        public float curveAmplifier = 1.0f;
 
         [Range(0.0f, 100.0f), Tooltip("この閾値未満の音素の重みは無視する")]
         public float weightThreashold = 2.0f;
@@ -18,10 +21,17 @@ namespace XVI.AniLipSync {
         public float frameRate = 12.0f;
 
         [Tooltip("BlendShapeの値を変化させるSkinnedMeshRenderer")]
-        public SkinnedMeshRenderer skinnedMeshRenderer;
+        public VRMBlendShapeProxy blendShapeProxy;
 
         [Tooltip("aa, E, ih, oh, ouの順で割り当てるBlendShapeのindex")]
-        public int[] visemeToBlendShape = new int[5];
+        private Dictionary<BlendShapeKey, float> defaultValueDictionary = new Dictionary<BlendShapeKey, float> {
+            {new BlendShapeKey(BlendShapePreset.A), 0.0f },
+            {new BlendShapeKey(BlendShapePreset.E), 0.0f },
+            {new BlendShapeKey(BlendShapePreset.I), 0.0f },
+            {new BlendShapeKey(BlendShapePreset.O), 0.0f },
+            {new BlendShapeKey(BlendShapePreset.U), 0.0f },
+        };
+        private List<BlendShapeKey> keyList;
 
         [Tooltip("長音時、このRMS値（音量）より大きければ口の形を維持する")]
         public float rmsThreshold = 0.005f;
@@ -33,8 +43,10 @@ namespace XVI.AniLipSync {
         float frameRateTimer = 0.0f;
 
         void Start() {
-            if (skinnedMeshRenderer == null) {
-                Debug.LogError("SkinnedMeshRendererが指定されていません。", this);
+            keyList = new List<BlendShapeKey>(defaultValueDictionary.Keys);
+
+            if (blendShapeProxy == null) {
+                Debug.LogError("VRMBlendShapeProxyが指定されていません。", this);
             }
 
             context = GetComponent<OVRLipSyncContextBase>();
@@ -47,7 +59,7 @@ namespace XVI.AniLipSync {
         }
 
         void Update() {
-            if (context == null || skinnedMeshRenderer == null) {
+            if (context == null || blendShapeProxy == null) {
                 return;
             }
 
@@ -66,12 +78,9 @@ namespace XVI.AniLipSync {
             frameRateTimer -= 1.0f / frameRate;
 
             // すでに設定されているBlendShapeの重みをリセット
-            foreach (var blendShape in visemeToBlendShape) {
-                if (blendShape < 0) {
-                    continue;
-                }
-
-                skinnedMeshRenderer.SetBlendShapeWeight(blendShape, 0.0f);
+            foreach (var key in keyList)
+            {
+                defaultValueDictionary[key] = 0.0f;
             }
 
             // 最大の重みを持つ音素を探す
@@ -108,7 +117,11 @@ namespace XVI.AniLipSync {
             }
 
             var visemeIndex = maxVisemeIndex - (int)OVRLipSync.Viseme.aa;
-            skinnedMeshRenderer.SetBlendShapeWeight(visemeToBlendShape[visemeIndex], transitionCurves[visemeIndex].Evaluate(transitionTimer) * curveAmplifier);
+            if (visemeIndex >= 0)
+            {
+                defaultValueDictionary[keyList[visemeIndex]] = transitionCurves[visemeIndex].Evaluate(transitionTimer) * curveAmplifier;
+            }
+            blendShapeProxy.SetValues(defaultValueDictionary.ToList());
         }
     }
 
